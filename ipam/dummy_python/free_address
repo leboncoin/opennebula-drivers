@@ -1,0 +1,78 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+""" OpenNebula FREE ADDRESS """
+
+# Standard library imports
+from base64 import b64decode
+from datetime import datetime
+from random import randint
+from sys import argv
+
+# Third party library imports
+from xmltodict import parse
+
+# Variables
+ACTION = 'FREE'
+DRV_ACTION = argv[1]
+REQ_ID = randint(1, 1000)
+LOG_FILE = open('/var/log/one/dummy_python.log', 'a')
+VERBOSE = True
+
+###############################################################################
+# This script is used to set an IP address as free. The IP will be released
+# by OpenNebula VMs
+#
+# This scripts MUST exit 0 if the address is freed.
+#
+# Input Arguments:
+#  $1 - Base64 encoded XML with the AR description and the address request
+#  $2 - Request ID
+#
+# XML format
+#  <IPAM_DRIVER_ACTION_DATA>
+#  <AR>
+#    <TYPE>IP4</TYPE>
+#    <IP> First IP in the network in '.' notation
+#    <MAC> First MAC in the network in ':' notation
+#    <SIZE>Number of IPs in the network
+#    <NETWORK_ADDRESS> Base network address
+#    <NETWORK_MASK> Network mask
+#    <GATEWAY> Default gateway for the network
+#    <DNS> DNS servers, a space separated list of servers
+#    <GUEST_MTU> Sets the MTU for the NICs in this network
+#    <SEARCH_DOMAIN> for DNS client
+# <ADDRESS>
+#   <IP>
+#   <SIZE> Number of IPs to allocate
+#   <MAC> MAC is optional
+#
+################################################################################
+
+def get_args():
+    """ Decode args """
+    xml_args = b64decode(DRV_ACTION)
+    return parse(xml_args)['IPAM_DRIVER_ACTION_DATA']
+
+def log_me(string, force=False):
+    """ Format log """
+    if VERBOSE or force:
+        LOG_FILE.write('%s [%s]: [%s] %s\n' % (
+            datetime.now().strftime("%a %b %H:%M:%S %Y"),
+            REQ_ID,
+            ACTION,
+            string))
+
+def main():
+    """ Main class """
+    args = get_args()
+    log_me('get_args : %s' % args)
+
+    ip_addr = args['ADDRESS']['IP']
+    log_me('Free %s' % ip_addr)
+
+main()
+
+log_me('Done.')
+LOG_FILE.close()
+
+exit(0)
