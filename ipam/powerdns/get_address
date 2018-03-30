@@ -1,0 +1,188 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+""" OpenNebula GET ADDRESS """
+
+# Standard library imports
+from base64 import b64decode
+from datetime import datetime
+from json import dumps
+from random import randint
+from subprocess import check_output
+from sys import argv
+
+# Third party library imports
+from ipaddress import ip_address
+from requests import Session
+from xmltodict import parse
+
+# Variables
+ACTION = 'GET'
+ALPHABET = 'abcdefghijklmnopqrstuvwxyz'
+DRV_ACTION = argv[1]
+REQ_ID = randint(1, 1000)
+LOG_FILE = open('/var/log/one/powerdns.log', 'a')
+POWERDNS = {
+    'api_host': 'powerdns.domain.net',
+    'api_key': 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx',
+    'api_port': 8081,
+}
+PROXY = 'http://proxy.domain.net:3128'
+SESSION = Session()
+VERBOSE = True
+ZONE = 'domain.net'
+
+###############################################################################
+# This script is used to get a free IP address (or set of IPs). The IP will be
+# used by OpenNebula VMs and should not be allocated to any other host in the
+# network.
+#
+# Input Arguments:
+#  $1 - Base64 encoded XML with the AR description and the address request
+#  $2 - Request ID
+#
+# XML format
+#  <IPAM_DRIVER_ACTION_DATA>
+#  <AR>
+#    <TYPE>IP4</TYPE>
+#    <IP> First IP in the network in '.' notation
+#    <MAC> First MAC in the network in ':' notation
+#    <SIZE>Number of IPs in the network
+#    <NETWORK_ADDRESS> Base network address
+#    <NETWORK_MASK> Network mask
+#    <GATEWAY> Default gateway for the network
+#    <DNS> DNS servers, a space separated list of servers
+#    <GUEST_MTU> Sets the MTU for the NICs in this network
+#    <SEARCH_DOMAIN> for DNS client
+# <ADDRESS>
+#   <IP>
+#   <SIZE> Number of IPs to allocate
+#   <MAC> MAC is optional
+#
+# This scrit MUST output the leased IP range, if the "size" IPs cannot be
+# assgined the sript must return -1, otherwise it must exit 0. The answer to
+# OpenNebula needs to include the ADDRESS spec:
+#
+#  ADDRESS = [ IP = "10.0.0.2", SIZE=34 ]
+#
+################################################################################
+
+def decode(hostname):
+    """ Decode a Hostname into an IP """
+    dec = ''
+    for digit in hostname:
+        if digit == 'z':
+            dec += '.'
+        else:
+            dec += str(ALPHABET.index(digit))
+    return dec
+
+def encode(ip_addr):
+    """ Encode an IP into a Hostname """
+    enc = ''
+    for digit in ip_addr:
+        if digit == '.':
+            enc += 'z'
+        else:
+            enc += ALPHABET[int(digit)]
+    return enc
+
+def get_args():
+    """ Decode args """
+    xml_args = b64decode(DRV_ACTION)
+    return parse(xml_args)['IPAM_DRIVER_ACTION_DATA']
+
+def log_me(string, force=False):
+    """ Format log """
+    if VERBOSE or force:
+        LOG_FILE.write('%s [%s]: [%s] %s\n' % (
+            datetime.now().strftime("%a %b %H:%M:%S %Y"),
+            REQ_ID,
+            ACTION,
+            string))
+
+def onevm_match_record(name_record):
+    """ Verify if record is already in OpenNebula """
+    log_me('onevm_match_record : %s' % name_record)
+
+    search = check_output([
+        '/usr/bin/onevm',
+        'list',
+        '-l', 'IP',
+        '--csv'
+        ])
+    return name_record in search.split('\n')
+
+def powerdns_match_record(name_record):
+    """ Verify if record is already in PowerDNS """
+    log_me('powerdns_match_record : %s' % name_record)
+
+    req = SESSION.get(
+        'http://%s:%s/api/v1/servers/localhost/search-data?q=%s' %
+        (POWERDNS['api_host'], POWERDNS['api_port'], name_record),
+        proxies={'http': PROXY},
+        headers={'X-API-Key': POWERDNS['api_key']})
+    return req.text != '[]'
+
+def powerdns_add_record(name_record, content_record, zone):
+    """ Add record in PowerDNS via API """
+    record = {}
+    record['disabled'] = False
+    record['name'] = name_record
+    record['set-ptr'] = True
+    record['content'] = content_record
+    record['type'] = 'A'
+    record['priority'] = 0
+    rrsets = {}
+    rrsets['records'] = [record]
+    rrsets['changetype'] = 'REPLACE'
+    rrsets['type'] = 'A'
+    rrsets['name'] = name_record
+    rrsets['ttl'] = 3600
+    payload = {}
+    payload['rrsets'] = [rrsets]
+
+    log_me('powerdns payload : %s\n' % payload)
+
+    SESSION.patch(
+        'http://%s:%s/api/v1/servers/localhost/zones/%s' %
+        (POWERDNS['api_host'], POWERDNS['api_port'], zone),
+        data=dumps(payload),
+        proxies={'http': PROXY},
+        headers={'X-API-Key': POWERDNS['api_key']})
+
+def main():
+    """ Main class """
+    args = get_args()
+    log_me('get_args : %s' % args)
+
+    first_net_ip = ip_address(args['AR']['IP'])
+    size = int(args['AR']['SIZE'])
+    log_me('first_net_ip=%s, size=%s' % (first_net_ip, size))
+
+    # Pick a random IP Adress
+    ip_candidate = str(first_net_ip + randint(0, size-1))
+    log_me('[INIT] ip_candidate=%s' % ip_candidate)
+
+    # Check if the IP match nothing
+    while onevm_match_record(ip_candidate) or powerdns_match_record(ip_candidate):
+        ip_candidate = str(first_net_ip + randint(0, size-1))
+        log_me('[RETRY] ip_candidate=%s' % ip_candidate)
+
+    log_me('[FINAL] ip_candidate=%s' % ip_candidate)
+
+    hostname = encode(ip_candidate)
+    log_me('hostname=%s' % hostname)
+
+    # Add the record in PowerDNS
+    log_me('hostname=%s, zone=%s' % (hostname, ZONE), force=True)
+    powerdns_add_record('%s.%s' % (hostname, ZONE), ip_candidate, ZONE)
+
+    log_me('ADDRESS = [ IP = "%s", SIZE=1 ]' % ip_candidate, force=True)
+    return 'ADDRESS = [ IP = "%s", SIZE=1 ]' % ip_candidate
+
+print main()
+
+log_me('Done.')
+LOG_FILE.close()
+
+exit(0)

@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+""" OpenNebula REGISTER ADDRESS """
+
+# Standard library imports
+from base64 import b64decode
+from datetime import datetime
+from random import randint
+from sys import argv
+
+# Third party library imports
+from xmltodict import parse
+
+# Variables
+ACTION = 'REGISTER'
+DRV_ACTION = argv[1]
+LOG_FILE = open('/var/log/one/powerdns.log', 'a')
+REQ_ID = randint(1, 1000)
+VERBOSE = True
+
+###############################################################################
+# This script is used to register a new IP network in the IPAM. The network may
+# be selected by a pool of free networks or if an specific network is requested
+# its availability maybe checked by the IPAM driver.
+#
+# The IPAM driver must return an OpenNebula AddressRange definition, potentially
+# augmented with network specific variables to be used by VMs (e.g. GATEWAYS,
+# MASK...)
+#
+# Input Arguments:
+#  $1 - Base64 encoded XML with AR request
+#  $2 - Request ID
+#
+# XML format
+#  <IPAM_DRIVER_ACTION_DATA>
+#  <AR>
+#    <TYPE>IP4</TYPE>
+#    <IP> First IP in the network in '.' notation
+#    <MAC> First MAC in the network in ':' notation
+#    <SIZE>Number of IPs in the network
+#    <NETWORK_ADDRESS> Base network address
+#    <NETWORK_MASK> Network mask
+#    <GATEWAY> Default gateway for the network
+#    <DNS> DNS servers, a space separated list of servers
+#    <GUEST_MTU> Sets the MTU for the NICs in this network
+#    <SEARCH_DOMAIN> for DNS client
+#
+# The response MUST include IPAM_MAD, TYPE, IP and SIZE attributes, example:
+#   - A basic network definition
+#       AR = [
+#         IPAM_MAD = "dummy",
+#         TYPE = "IP4",
+#         IP   = "10.0.0.1",
+#         SIZE = "255"
+#       ]
+#
+#   - A complete network definition. Custom attributes (free form, key-value)
+#     can be added, named cannot be repeated.
+#       AR = [
+#         IPAM_MAD = "dummy",
+#         TYPE = "IP4",
+#         IP   = "10.0.0.2",
+#         SIZE = "200",
+#         NETWORK_ADDRESS   = "10.0.0.0",
+#         NETWORK_MASK      = "255.255.255.0",
+#         GATEWAY           = "10.0.0.1",
+#         DNS               = "10.0.0.1",
+#         IPAM_ATTR         = "10.0.0.240",
+#         OTHER_IPAM_ATTR   = ".mydoamin.com"
+#       ]
+################################################################################
+
+def get_args():
+    """ Decode args """
+    xml_args = b64decode(DRV_ACTION)
+    return parse(xml_args)['IPAM_DRIVER_ACTION_DATA']
+
+def log_me(string, force=False):
+    """ Format log """
+    if VERBOSE or force:
+        LOG_FILE.write('%s [%s]: [%s] %s\n' % (
+            datetime.now().strftime("%a %b %H:%M:%S %Y"),
+            REQ_ID,
+            ACTION,
+            string))
+
+def main():
+    """ Main class """
+    args = get_args()
+    log_me('get_args : %s' % args)
+
+main()
+
+log_me('Done.')
+LOG_FILE.close()
+
+exit(0)

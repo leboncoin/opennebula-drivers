@@ -1,0 +1,131 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+""" OpenNebula FREE ADDRESS """
+
+# Standard library imports
+from base64 import b64decode
+from datetime import datetime
+from json import dumps, loads
+from random import randint
+from sys import argv
+
+# Third party library imports
+from requests import Session
+from xmltodict import parse
+
+# Variables
+ACTION = 'FREE'
+ALPHABET = 'abcdefghijklmnopqrstuvwxyz'
+DRV_ACTION = argv[1]
+REQ_ID = randint(1, 1000)
+LOG_FILE = open('/var/log/one/powerdns.log', 'a')
+POWERDNS = {
+    'api_host': 'powerdns.domain.net',
+    'api_key': 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx',
+    'api_port': 8081,
+}
+PROXY = 'http://proxy.domain.net:3128'
+SESSION = Session()
+VERBOSE = True
+
+###############################################################################
+# This script is used to set an IP address as free. The IP will be released
+# by OpenNebula VMs
+#
+# This scripts MUST exit 0 if the address is freed.
+#
+# Input Arguments:
+#  $1 - Base64 encoded XML with the AR description and the address request
+#  $2 - Request ID
+#
+# XML format
+#  <IPAM_DRIVER_ACTION_DATA>
+#  <AR>
+#    <TYPE>IP4</TYPE>
+#    <IP> First IP in the network in '.' notation
+#    <MAC> First MAC in the network in ':' notation
+#    <SIZE>Number of IPs in the network
+#    <NETWORK_ADDRESS> Base network address
+#    <NETWORK_MASK> Network mask
+#    <GATEWAY> Default gateway for the network
+#    <DNS> DNS servers, a space separated list of servers
+#    <GUEST_MTU> Sets the MTU for the NICs in this network
+#    <SEARCH_DOMAIN> for DNS client
+# <ADDRESS>
+#   <IP>
+#   <SIZE> Number of IPs to allocate
+#   <MAC> MAC is optional
+#
+################################################################################
+
+def get_args():
+    """ Decode args """
+    xml_args = b64decode(DRV_ACTION)
+    return parse(xml_args)['IPAM_DRIVER_ACTION_DATA']
+
+def powerdns_get_a(ip_addr):
+    """ Verify if record is already in PowerDNS """
+    log_me('powerdns_get_a : %s' % ip_addr)
+
+    req = SESSION.get(
+        'http://%s:%s/api/v1/servers/localhost/search-data?q=%s' %
+        (POWERDNS['api_host'], POWERDNS['api_port'], ip_addr),
+        proxies={'http': PROXY},
+        headers={'X-API-Key': POWERDNS['api_key']})
+
+    if loads(req.text) == []:
+        log_me('No entry in DNS : %s' % ip_addr, force=True)
+        exit(0)
+
+    a_entry = loads(req.text)[0]['name']
+    log_me('A entry : %s' % a_entry)
+    return a_entry
+
+def log_me(string, force=False):
+    """ Format log """
+    if VERBOSE or force:
+        LOG_FILE.write('%s [%s]: [%s] %s\n' % (
+            datetime.now().strftime("%a %b %H:%M:%S %Y"),
+            REQ_ID,
+            ACTION,
+            string))
+
+def powerdns_delete_record(name_record, type_record, zone):
+    """ Add record in PowerDNS via API """
+    rrsets = {}
+    rrsets['changetype'] = 'DELETE'
+    rrsets['type'] = type_record
+    rrsets['name'] = name_record
+    rrsets['ttl'] = 3600
+    payload = {}
+    payload['rrsets'] = [rrsets]
+
+    log_me('powerdns payload : %s' % payload)
+
+    req = SESSION.patch(
+        'http://%s:%s/api/v1/servers/localhost/zones/%s' %
+        (POWERDNS['api_host'], POWERDNS['api_port'], zone),
+        data=dumps(payload),
+        proxies={'http': PROXY},
+        headers={'X-API-Key': POWERDNS['api_key']})
+    log_me('return : %s' % req.text)
+
+def main():
+    """ Main class """
+    args = get_args()
+    log_me('get_args : %s' % args)
+
+    ip_addr = args['ADDRESS']['IP']
+    a_entry = powerdns_get_a(ip_addr)
+    zone = '.'.join(a_entry.split('.')[1:])
+    arpa_zone = '%s.%s.%s.in-addr.arpa.' % (ip_addr.split('.')[2], ip_addr.split('.')[1], ip_addr.split('.')[0])
+
+    powerdns_delete_record(a_entry, 'A', zone)
+    powerdns_delete_record('%s.%s' % (ip_addr.split('.')[3], arpa_zone), 'PTR', arpa_zone)
+
+main()
+
+log_me('Done.')
+LOG_FILE.close()
+
+exit(0)
