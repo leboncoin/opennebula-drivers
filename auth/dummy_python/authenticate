@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+""" OpenNebula AUTH """
+
+# Standard library imports
+from datetime import datetime
+from sys import argv
+
+LOG_FILE = open('/var/log/one/lbc_auth.log', 'a')
+VERBOSE = True
+DEFAULT_AUTH_METHOD = 'lbc_auth'
+USERNAME = argv[1]
+PASSWORD = argv[3]
+
+def log_me(string, force=False):
+    """ Format log """
+    if VERBOSE or force:
+        LOG_FILE.write('%s %s\n' % (
+            datetime.now().strftime("%a %b %H:%M:%S %Y"),
+            string))
+
+log_me('%s %s ******' % (DEFAULT_AUTH_METHOD, USERNAME))
+
+print '%s %s %s' % (DEFAULT_AUTH_METHOD, USERNAME, PASSWORD)
+
+log_me('Done.')
+LOG_FILE.close()
+
+exit(0)
