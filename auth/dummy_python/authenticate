@@ -21,7 +21,7 @@ def log_me(string, force=False):
 
 log_me('%s %s ******' % (DEFAULT_AUTH_METHOD, USERNAME))
 
-print '%s %s %s' % (DEFAULT_AUTH_METHOD, USERNAME, PASSWORD)
+print '%s %s %s' % (DEFAULT_AUTH_METHOD, USERNAME, "xxxxxxxxx")
 
 log_me('Done.')
 LOG_FILE.close()
