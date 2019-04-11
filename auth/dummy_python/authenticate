@@ -4,13 +4,47 @@
 
 # Standard library imports
 from datetime import datetime
-from sys import argv
+from re import split
 
 LOG_FILE = open('/var/log/one/lbc_auth.log', 'a')
 VERBOSE = True
 DEFAULT_AUTH_METHOD = 'lbc_auth'
-USERNAME = argv[1]
-PASSWORD = argv[3]
+
+def html_unescape(string):
+    """
+    HTML ESCAPE :
+    " is replaced with &quot;
+    & is replaced with &amp;
+    < is replaced with &lt;
+    > is replaced with &gt;
+    """
+    return string.replace('&quot;', '"')\
+            .replace('&amp;', '&')\
+            .replace('&lt;', '<')\
+            .replace('&gt;', '>')
+
+def get_credentials():
+    """
+    Extract credentials from XML :
+    <AUTHN>
+      <USERNAME>user.name</USERNAME>
+      <PASSWORD>xxxxxxxxxx</PASSWORD>
+      <SECRET>SecretPassw0rd</SECRET>
+    </AUTHN>
+    """
+    username = 'no_user'
+    password = 'no_password'
+    arg = raw_input()
+    while arg != '</AUTHN>':
+        if arg.startswith('  <USERNAME>'):
+            username = split('[<>]', arg)[2]
+        elif arg.startswith('  <SECRET>'):
+            password = split('[<>]', arg)[2]
+        arg = raw_input()
+    return username, html_unescape(password)
+
+USERNAME, PASSWORD = get_credentials()
+
 
 def log_me(string, force=False):
     """ Format log """
