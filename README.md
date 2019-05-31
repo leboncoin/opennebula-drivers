@@ -1,7 +1,8 @@
+
 # OpenNebula Driver
 
 Some IPAM and AUTH driver for OpenNebula
-Developped for @leboncoin
+Developed for @leboncoin
 
 ## Prerequisites
 
@@ -16,6 +17,7 @@ su - oneadmin
 
 # Put the driver in the right directory.
 # IPAM : ~/remotes/ipam/
+# IPAM HOOK : ~/remotes/hooks/ft/
 # AUTH : ~/remotes/auth/
 # The owner should be oneadmin:oneadmin
 
@@ -42,6 +44,12 @@ AUTH_MAD = [
     EXECUTABLE = "one_auth_mad",
     AUTHN = "ssh,x509,ldap,server_cipher,server_x509,<driver_name>"
 ]
+...
+VM_HOOK = [
+   name      = "hook_powerdns",
+   on        = "CREATE",
+   command   = "/var/lib/one/remotes/hooks/ft/hook_powerdns.py",
+   arguments = "$TEMPLATE" ]
 ```
 
 ```bash
@@ -56,7 +64,11 @@ ps aux | grep one_ipam
 
 You need to create a new *Address Range* in a *Virtual Network*.
 
-Add this driver during the create, it cannot be updated.
+The IPAM works in two steps :
+ - The instance is created, Opennebula is asking a new IP to the IPAM driver **powerdns**
+     - The driver doesn't know the final name of the instance, it creates an *A entry* in the DNS relative to the encoded IP
+ - When the instance is in the state **CREATE**, it triggers the **hook_powerdns** which is updating the *A entry* in the DNS (replacing the encoded IP value to the final name)
+
 
 ## AUTH configuration
 
@@ -67,4 +79,3 @@ To active this auth driver by default, add this line into `/etc/one/oned.conf` :
 DEFAULT_AUTH = "<driver_name>"
 ...
 ```
-
